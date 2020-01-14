@@ -6,6 +6,8 @@ import scala.io.StdIn
 import com.typesafe.config.ConfigFactory
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
+import com.gemini.jobcoin.JobcoinClient.Address
+
 import scala.concurrent.ExecutionContext.Implicits._
 
 object JobcoinMixer {
@@ -20,8 +22,8 @@ object JobcoinMixer {
     val config = ConfigFactory.load()
 
     // Test HTTP client
-    // val client = new JobcoinClient(config)
-    // client.testGet().map(response => println(s"Response:\n$response"))
+     val client = new JobcoinClient(config)
+     client.testGet().map(response => println(s"Response:\n$response"))
 
     try {
       while (true) {
