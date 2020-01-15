@@ -15,70 +15,94 @@ import scala.concurrent.Future
 import DefaultBodyReadables._
 
 import scala.concurrent.ExecutionContext.Implicits._
-import JobcoinClient.{Address, PlaceholderResponse}
+import JobcoinClient.{Address, AddressWithoutName}
 import org.joda.time.DateTime
+import play.libs.ws.StandaloneWSResponse
 
-import scala.util.Try
+import scala.util.{Failure, Success, Try}
 
 class JobcoinClient(config: Config)(implicit materializer: Materializer) {
   private val wsClient = StandaloneAhcWSClient()
   private val apiAddressesUrl = config.getString("jobcoin.apiAddressesUrl")
+  private val apiTransactionsUrl = config.getString("jobcoin.apiTransactionsUrl")
   
   // Docs:
   // https://github.com/playframework/play-ws
   // https://www.playframework.com/documentation/2.6.x/ScalaJsonCombinators
-  def testGet(): Future[PlaceholderResponse] = {
-//    val response = await {
-//      wsClient
-//        .url("https://jsonplaceholder.typicode.com/posts/1")
-//        .get()
-//    }
-//
-//    response
-//      .body[JsValue]
-//      .validate[PlaceholderResponse]
-//      .get
+  def sendJobcoins(fromAddress: String, toAddress: String, amount: Double): Future[Unit] = {
+    val data = Json.obj(
+      "fromAddress" -> fromAddress,
+      "toAddress" -> toAddress,
+      "amount" -> amount.toString()
+    )
 
     wsClient
-      .url("https://jsonplaceholder.typicode.com/posts/1")
-      .get()
-      .map { response =>
-        response.body[JsValue]
-          .validate[PlaceholderResponse]
-          .get
+      .url(apiTransactionsUrl)
+      .post(data)
+      .flatMap { response: StandaloneWSRequest#Response =>
+        response.status match {
+          case 200 => Future.unit
+          case _ => Future.failed[Unit](new RuntimeException("cannot send Jobcoins"))
+        }
       }
   }
 
-  def testGetAddress(address: String): Future[Address] = {
+  def getAddress(addressName: String): Future[Try[Address]] = {
     wsClient
-      .url(apiAddressesUrl + "/" + address)
+      .url(apiAddressesUrl + "/" + addressName)
       .get
-      .map { response =>
-        System.out.println(response)
-        response.body[JsValue]
-          .validate[Address]
-          .get
+      .map { response: StandaloneWSRequest#Response =>
+        if (response.status != 200) {
+          throw new RuntimeException(s"error getting address for $addressName: ${response.status}")
+        } else {
+          val address = response.body[JsValue]
+            .validate[AddressWithoutName]
+            .map(Address(addressName, _))
+            .get
+          if (address.balance.equals(0.0) && address.transactions.length == 0) {
+            throw new RuntimeException(s"address $addressName does not exist")
+          } else {
+            Success(address)
+          }
+        }
+      }
+      .recover {
+        case e: Throwable => {
+          Failure(e)
+        }
       }
   }
 }
 
 object JobcoinClient {
-  case class PlaceholderResponse(userId: Int, id: Int, title: String, body: String)
-  object PlaceholderResponse {
-    implicit val jsonReads: Reads[PlaceholderResponse] = Json.reads[PlaceholderResponse]
-  }
-  case class Address(balance: Double, transactions: Seq[Transaction])
-  object Address {
-    implicit val addressReads: Reads[Address] = (
+  case class AddressWithoutName(balance: Double, transactions: Seq[Transaction])
+
+  object AddressWithoutName {
+    implicit val addressReads: Reads[AddressWithoutName] = (
       (JsPath \ "balance").read[String].map(_.toDouble) and
       (JsPath \ "transactions").read[Seq[Transaction]]
-    )(Address.apply _)
+    )(AddressWithoutName.apply _)
   }
-  case class Transaction(timestamp: DateTime, toAddress: String, amount: Double)
+
+  case class Address(name: String, balance: Double, transactions: Seq[Transaction])
+
+  object Address {
+    def apply(name: String, addressWithoutName: AddressWithoutName): Address = {
+      Address(
+        name = name,
+        balance = addressWithoutName.balance,
+        transactions = addressWithoutName.transactions
+      )
+    }
+  }
+
+  case class Transaction(timestamp: DateTime, toAddress: String, fromAddress: Option[String], amount: Double)
+
   object Transaction {
     implicit val transactionReads: Reads[Transaction] = (
       (JsPath \ "timestamp").read[String].map(parseDateTime(_)) and
       (JsPath \ "toAddress").read[String] and
+      (JsPath \ "fromAddress").readNullable[String] and
       (JsPath \ "amount").read[String].map(_.toDouble)
     ).apply(Transaction.apply _)
     private def parseDateTime(s: String): DateTime = {
