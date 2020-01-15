@@ -1,12 +1,9 @@
 package com.gemini.jobcoin
 
-import java.io
-
 import com.gemini.jobcoin.JobcoinClient.Address
 
-import scala.collection.immutable
-import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits._
+import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
 import scala.util.{Failure, Success, Try}
 
@@ -15,8 +12,6 @@ case class TransactionRequest(
   requestedSend: Double,
   toAddresses: Seq[AddressAndAmount]
 ) {
-  // ensure the amounts to send each recipient equals the total requestedSend value
-  assert(requestedSend.equals(toAddresses.map(_.amountToSend).foldLeft(0.0)(_ + _)))
 
   /**
    * Returns a deposit address in the (inclusive) range [0,...,numDepositAddresses - 1]
@@ -41,10 +36,12 @@ case class TransactionRequest(
 
 object TransactionRequest {
 
-
   /**
    * Expects an input Seq[String] of the form:
    * senderAddress, recipient1Address, recipient1Amount, recipient2Address, recipient2Amount, ...
+   *
+   * In the interest of time, I was not able to code all edge cases of bad formed input.
+   * This throw RuntimeExceptions if the input is badly formed.
    *
    * The first element in sequence will be the sender address.
    * The second element in the sequence will be the amount the sender will send.
@@ -55,10 +52,9 @@ object TransactionRequest {
    * recipient, etc.
    */
   def parse(inputLine: Seq[String], jobcoinClient: JobcoinClient): Try[TransactionRequest] = {
-    // TODO assert that the line length is >= 4 and even number length
     // sender should be in first position
     val senderAddressFuture: Future[Try[Address]] = jobcoinClient.getAddress(inputLine(0))
-    val senderAmount: Double = inputLine(1).toDouble // todo should be try?
+    val senderAmount: Double = inputLine(1).toDouble
 
     val recipientAddressesFuture: Future[List[Try[Address]]] =
       Future.sequence(
@@ -69,7 +65,7 @@ object TransactionRequest {
             jobcoinClient.getAddress(recipientAddress)
           }
       )
-    val recipientAmounts: Seq[Double] = // todo should be try in case we can't parse doubles?
+    val recipientAmounts: Seq[Double] =
       inputLine
         .drop(3) // amounts for each recipient begin at 4th index
         .grouped(2).map(_.head).toList
@@ -81,11 +77,9 @@ object TransactionRequest {
     } yield {
       senderAddressTry match {
         case Failure(e) => {
-          System.out.println("gets here")
           Failure[TransactionRequest](e)
         }
         case Success(senderAddress) => {
-          System.out.println("gets here")
           val tryOfAddresses: Try[Seq[Address]] =
             Try(
               recipientAddressesTry.collect {
@@ -116,8 +110,7 @@ object TransactionRequest {
       }
     }
 
-    val result = Await.result(futureResult, 5.seconds)
-    result
+    Await.result(futureResult, 5.seconds)
   }
 }
 

@@ -1,7 +1,5 @@
 package com.gemini.jobcoin
 
-import java.util.UUID
-
 import scala.io.StdIn
 import com.typesafe.config.ConfigFactory
 import akka.actor.{ActorRef, ActorSystem, Props}
@@ -9,31 +7,33 @@ import akka.stream.ActorMaterializer
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext.Implicits._
-import scala.util.{Success, Try}
+import scala.util.{Failure, Success, Try}
 
 object JobcoinMixer {
   // Create an actor system
   implicit val actorSystem = ActorSystem()
   implicit val materializer = ActorMaterializer()
 
+  // Load Config
+  val config = ConfigFactory.load()
+
+  // create DepositAddress actors
+  val numDepositAddresses: Int = config.getInt("jobcoin.numDepositAddresses")
+  val depositAddressActors: immutable.Seq[ActorRef] = {
+    (1 to numDepositAddresses).map { addressNumber: Int =>
+      actorSystem.actorOf(Props[DepositAddress], name = s"DepositAddress$addressNumber")
+    }
+  }
+
+  // create HouseAddress actor
+  val houseAddressActor: ActorRef = {
+    JobcoinMixer.actorSystem.actorOf(Props[HouseAddress], name = s"HouseAddress")
+  }
+
   object CompletedException extends Exception
 
   def main(args: Array[String]): Unit = {
-
-
-    // Load Config
-    val config = ConfigFactory.load()
-
-    // Test HTTP client
-     val client = new JobcoinClient(config)
-
-    // create deposit addresses
-    val numDepositAddresses: Int = config.getInt("jobcoin.numDepositAddresses")
-    val depositAddressActors: immutable.Seq[ActorRef] = {
-      (1 to numDepositAddresses).map { addressNumber: Int =>
-        actorSystem.actorOf(Props[DepositAddress], name = s"DepositAddress$addressNumber")
-      }
-    }
+    val client = new JobcoinClient(config)
 
     try {
       while (true) {
@@ -46,9 +46,7 @@ object JobcoinMixer {
         if (line == "") {
           println(s"You must specify empty addresses to mix into!\n$helpText")
         } else {
-          processTransaction(addresses, depositAddressActors, client)
-          val depositAddress = UUID.randomUUID()
-          println(s"You may now send Jobcoins to address $depositAddress. They will be mixed and sent to your destination addresses.")
+          processTransaction(addresses, client)
         }
       }
     } catch {
@@ -65,7 +63,6 @@ object JobcoinMixer {
    */
   private def processTransaction(
     line: Seq[String],
-    depositAddressActors: Seq[ActorRef],
     jobcoinClient: JobcoinClient
   ): Unit = {
     val transactionRequestTry: Try[TransactionRequest] = TransactionRequest.parse(line, jobcoinClient)
@@ -74,23 +71,57 @@ object JobcoinMixer {
         if (transactionRequest.fromAddress.balance < transactionRequest.requestedSend) {
           println(s"Sender address ${transactionRequest.fromAddress.name} does not have enough Jobcoin to send")
         } else {
-          val depositAddressNum: Int = transactionRequest.getDepositAddressNumber()
-          val depositAddressActor = depositAddressActors(depositAddressNum)
-          depositAddressActor ! transactionRequestTry
+          transferToDepositAddress(transactionRequest, jobcoinClient)
         }
       case _ =>
-        println(s"Unable to parse the transaction given input: $line\n\n$helpText") // todo update the help message
+        println(s"Unable to parse the transaction given input: $line\n\n$helpText")
     }
   }
 
-  val prompt: String = "Please enter a comma-separated list of new, unused Jobcoin addresses where your mixed Jobcoins will be sent."
+  private def transferToDepositAddress(
+    transactionRequest: TransactionRequest,
+    jobcoinClient: JobcoinClient
+  ): Unit = {
+    val fromAddressName = transactionRequest.fromAddress.name
+    val amount = transactionRequest.requestedSend
+    val depositAddressNumber = transactionRequest.getDepositAddressNumber()
+    val depositAddressName = s"DepositAddress${depositAddressNumber + 1}"
+    println(s"$fromAddressName can now send Jobcoin to deposit address [$depositAddressName]")
+    println(s"[$fromAddressName] now sending mixed Jobcoin amount of [$amount] to [$depositAddressName]")
+
+    jobcoinClient
+      .sendJobcoins(
+        fromAddress = fromAddressName,
+        toAddress = depositAddressName,
+        amount = amount
+      )
+      .onComplete {
+        case Success(_) => {
+          println(s"[$fromAddressName] successfully transferred [$amount] Jobcoin to [$depositAddressName]")
+          val depositAddressTransfer = DepositAddressTransfer(
+            depositAddressName = depositAddressName,
+            recipientAddressesAndAmounts = transactionRequest.toAddresses
+          )
+
+          val depositAddressActor = depositAddressActors(depositAddressNumber)
+          depositAddressActor ! depositAddressTransfer
+        }
+
+        case Failure(e) => {
+          throw new RuntimeException(s"[$fromAddressName] failed to transfer [$amount] Jobcoin to [$depositAddressName]")
+        }
+      }
+  }
+
+  val prompt: String = "Enter comma-separated list of form: <SenderAddress>, <SenderAmount>, <RecipientAddress1>" +
+    ", <RecipientAmount1>, <RecipientAddress2>, <RecipientAmount2>"
   val helpText: String =
     """
       |Jobcoin Mixer
       |
-      |Takes in at least one return address as parameters (where to send coins after mixing). Returns a deposit address to send coins to.
+      |Takes in a sender address and amount, and recipient addresses and corresponding amounts. Will mix the recipients'
+      |Jobcoin totals together and send to a Deposit Address, and then get sent to a pooled House Address which will
+      |later send Jobcoin to the recipient addresses.
       |
-      |Usage:
-      |    run return_addresses...
     """.stripMargin
 }

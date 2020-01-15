@@ -1,35 +1,31 @@
 package com.gemini.jobcoin
 
-import play.api.libs.ws._
-import play.api.libs.ws.ahc._
+import akka.stream.Materializer
+import com.gemini.jobcoin.JobcoinClient.{Address, AddressWithoutName}
+import com.typesafe.config.Config
+import org.joda.time.DateTime
+import play.api.libs.functional.syntax._
+import play.api.libs.json.Reads._
+import play.api.libs.json._
 import play.api.libs.ws.JsonBodyReadables._
 import play.api.libs.ws.JsonBodyWritables._
-import play.api.libs.json._
-import play.api.libs.json.Reads._
-import play.api.libs.functional.syntax._
-import com.typesafe.config.Config
-import akka.stream.Materializer
-
-import scala.async.Async._
-import scala.concurrent.Future
-import DefaultBodyReadables._
+import play.api.libs.ws._
+import play.api.libs.ws.ahc._
 
 import scala.concurrent.ExecutionContext.Implicits._
-import JobcoinClient.{Address, AddressWithoutName}
-import org.joda.time.DateTime
-import play.libs.ws.StandaloneWSResponse
-
+import scala.concurrent.Future
 import scala.util.{Failure, Success, Try}
 
 class JobcoinClient(config: Config)(implicit materializer: Materializer) {
   private val wsClient = StandaloneAhcWSClient()
   private val apiAddressesUrl = config.getString("jobcoin.apiAddressesUrl")
   private val apiTransactionsUrl = config.getString("jobcoin.apiTransactionsUrl")
-  
-  // Docs:
-  // https://github.com/playframework/play-ws
-  // https://www.playframework.com/documentation/2.6.x/ScalaJsonCombinators
-  def sendJobcoins(fromAddress: String, toAddress: String, amount: Double): Future[Unit] = {
+
+  def sendJobcoins(
+    fromAddress: String,
+    toAddress: String,
+    amount: Double
+  ): Future[Unit] = {
     val data = Json.obj(
       "fromAddress" -> fromAddress,
       "toAddress" -> toAddress,
@@ -75,7 +71,10 @@ class JobcoinClient(config: Config)(implicit materializer: Materializer) {
 }
 
 object JobcoinClient {
-  case class AddressWithoutName(balance: Double, transactions: Seq[Transaction])
+  case class AddressWithoutName(
+    balance: Double,
+    transactions: Seq[Transaction]
+  )
 
   object AddressWithoutName {
     implicit val addressReads: Reads[AddressWithoutName] = (
@@ -84,7 +83,11 @@ object JobcoinClient {
     )(AddressWithoutName.apply _)
   }
 
-  case class Address(name: String, balance: Double, transactions: Seq[Transaction])
+  case class Address(
+    name: String,
+    balance: Double,
+    transactions: Seq[Transaction]
+  )
 
   object Address {
     def apply(name: String, addressWithoutName: AddressWithoutName): Address = {
@@ -96,7 +99,12 @@ object JobcoinClient {
     }
   }
 
-  case class Transaction(timestamp: DateTime, toAddress: String, fromAddress: Option[String], amount: Double)
+  case class Transaction(
+     timestamp: DateTime,
+     toAddress: String,
+     fromAddress: Option[String],
+     amount: Double
+  )
 
   object Transaction {
     implicit val transactionReads: Reads[Transaction] = (

@@ -1,10 +1,9 @@
 package com.gemini.jobcoin
 
-import akka.actor.{Actor, ActorRef, Props}
+import akka.actor.Actor
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigFactory
 
-import
 import scala.concurrent.ExecutionContext.Implicits._
 import scala.util.{Failure, Success}
 
@@ -13,55 +12,57 @@ class DepositAddress extends Actor {
   val config = ConfigFactory.load()
   val jobcoinClient = new JobcoinClient(config)
 
-  // create HouseAddress actor
-  val houseAddressActor: ActorRef = {
-    JobcoinMixer.actorSystem.actorOf(Props[HouseAddress], name = s"HouseAddress")
-  }
-
   override def receive: Receive = {
-    case transactionRequest: TransactionRequest => {
-      val depositAddressNumber = transactionRequest.getDepositAddressNumber()
-      val depositAddressName = s"DepositAddress${depositAddressNumber}"
-      jobcoinClient
-        .sendJobcoins(
-          fromAddress = transactionRequest.fromAddress.name,
-          toAddress = s"DepositAddress${depositAddressNumber + 1}",
-          amount = transactionRequest.requestedSend
-        )
-        .onComplete {
-          // when the transfer succeeds, move funds to the house address
-          case Success(_) =>
-            transactionRequest
-              .toAddresses
-              .map { addressAndAmount: AddressAndAmount =>
-                val houseAddressTransfer = HouseAddressTransfer(
-                  depositAddressName = depositAddressName,
-                  receiverAddressName = addressAndAmount.address.name,
-                  amount = addressAndAmount.amountToSend
-                )
-                houseAddressActor ! houseAddressTransfer
-              }
-          case _ =>
-            throw new RuntimeException("unable to transfer Jobcoin to the deposit address")
+    case depositAddressTransfer: DepositAddressTransfer => {
+      val depositAddressName = depositAddressTransfer.depositAddressName
+      println(s"[$depositAddressName] received a new DepositAddressTransfer")
+
+      depositAddressTransfer
+        .recipientAddressesAndAmounts
+        .map { addressAndAmount: AddressAndAmount =>
+          sendToHouseAddress(addressAndAmount, depositAddressName)
         }
     }
     case _ => {
       System.out.println(s"deposit address cannot recognize message")
     }
   }
-}
 
-object DepositAddress {
-  private val config = ConfigFactory.load()
-  private val numDepositAddresses: Int = config.getInt("jobcoin.numDepositAddresses")
+  private def sendToHouseAddress(
+    recipientAddressAndAmount: AddressAndAmount,
+    depositAddressName: String
+  ): Unit = {
+    val receiverAddressName = recipientAddressAndAmount.address.name
+    val amount = recipientAddressAndAmount.amountToSend
+    val houseAddressTransfer = HouseAddressTransfer(
+      depositAddressName = depositAddressName,
+      receiverAddressName = receiverAddressName,
+      amount = amount
+    )
 
-  def computeDepositAddress(addresses: Seq[String]): Int = {
-    val sorted = addresses.sortWith(_ < _)
-    val hashCode = sorted.hashCode() // todo does this respect unique ordering?
-    hashCode % (numDepositAddresses)
+    Thread.sleep(2000) // simulate 2 second delay
+    val houseAddressName = HouseAddress.houseAddressName
+
+    println(s"[${depositAddressName}] transfering [$amount] to pooled [$houseAddressName]")
+    jobcoinClient
+      .sendJobcoins(
+        fromAddress = depositAddressName,
+        toAddress = houseAddressName,
+        amount = amount
+      )
+      .onComplete {
+        case Success(_) => {
+          println(s"[$depositAddressName] successfully transferred [$amount] to pooled [$houseAddressName]")
+          JobcoinMixer.houseAddressActor ! houseAddressTransfer
+        }
+        case Failure(e) => {
+          throw new RuntimeException(s"[$depositAddressName] failed to transfer [$amount] to pooled [$houseAddressName]", e)
+        }
+      }
   }
 }
 
-case class DepositAddressInstruction(
-
+case class DepositAddressTransfer(
+  depositAddressName: String,
+  recipientAddressesAndAmounts: Seq[AddressAndAmount]
 )

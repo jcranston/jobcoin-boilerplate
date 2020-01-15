@@ -1,9 +1,6 @@
 package com.gemini.jobcoin
 
 import org.scalatest.{FlatSpec, Matchers}
-import org.scalatest._
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
-import java.nio.charset.StandardCharsets
 
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits._
@@ -12,7 +9,6 @@ import akka.stream.ActorMaterializer
 import com.gemini.jobcoin.JobcoinClient.{Address, Transaction}
 import com.typesafe.config.ConfigFactory
 import org.joda.time.{DateTime, DateTimeZone}
-import play.api.libs.ws.ahc.StandaloneAhcWSClient
 
 import scala.util.{Failure, Success}
 
@@ -24,14 +20,14 @@ class TransactionRequestSpec extends FlatSpec with Matchers {
 
   "Transaction request parser" should
     "correctly parse for valid addresses" in {
-      val inputLine = Seq("Sender1", "30.0", "Recipient1", "15.0", "Recipient2", "7.5")
+      val inputLine = Seq("Sender1", "50.0", "Recipient1", "50.0", "Recipient2", "50.0")
       TransactionRequest.parse(inputLine, jobcoinClient) match {
         case Failure(_) => fail() // should be well-formed
         case Success(transactionRequest) => {
           transactionRequest.fromAddress should be(senderAddress)
-          transactionRequest.requestedSend should be(30.0)
-          transactionRequest.toAddresses should contain(AddressAndAmount(recipient1Address, 15.0))
-          transactionRequest.toAddresses should contain(AddressAndAmount(recipient2Address, 7.5))
+          transactionRequest.requestedSend should be(50.0)
+          transactionRequest.toAddresses should contain(AddressAndAmount(recipient1Address, 50.0))
+          transactionRequest.toAddresses should contain(AddressAndAmount(recipient2Address, 50.0))
         }
       }
   }

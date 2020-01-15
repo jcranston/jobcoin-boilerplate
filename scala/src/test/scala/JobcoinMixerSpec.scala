@@ -8,11 +8,6 @@ import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits._
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
-import com.gemini.jobcoin.JobcoinClient.Address
-import com.typesafe.config.ConfigFactory
-import play.api.libs.ws.ahc.StandaloneAhcWSClient
-
-import scala.concurrent.{Await, Future}
 
 class MixerTests extends FlatSpec with Matchers {
   implicit val actorSystem = ActorSystem()
@@ -36,21 +31,5 @@ class MixerTests extends FlatSpec with Matchers {
     |""".stripMargin
 
     outCapture.toString should be (expectedOutput)
-  }
-
-  "Main method" should "print the deposit address when args are given" in {
-    val inputText = "test1,test2,test3\nquit\n"
-    val inputStream = new ByteArrayInputStream(inputText.getBytes(StandardCharsets.UTF_8))
-    val outCapture = new ByteArrayOutputStream
-    Console.withIn(inputStream) {
-      Console.withOut(outCapture) {
-        JobcoinMixer.main(Array[String]("test1", "test2"))
-      }
-    }
-
-    val pattern = "You may now send Jobcoins to address [0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}. They will be mixed and sent to your destination addresses.".r
-    val regexMatches = pattern findFirstIn outCapture.toString
-
-    regexMatches.isEmpty should be(false)
   }
 }
